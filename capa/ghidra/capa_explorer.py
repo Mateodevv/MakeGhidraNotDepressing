@@ -15,6 +15,8 @@ import logging
 import pathlib
 from typing import Any
 
+from java.awt import Color
+
 from ghidra.app.cmd.label import AddLabelCmd, CreateNamespacesCmd
 from ghidra.program.model.symbol import Namespace, SourceType, SymbolType
 
@@ -27,7 +29,8 @@ import capa.capabilities.common
 import capa.features.extractors.ghidra.extractor
 
 logger = logging.getLogger("capa_explorer")
-
+COLOR_PRE_COMMENT = Color(255, 255, 0) # yellow
+COLOR_PLATE_COMMENT = Color(255, 190, 190) # red
 
 def add_bookmark(addr, txt, category="CapaExplorer"):
     """create bookmark at addr"""
@@ -111,6 +114,7 @@ class CapaMatchData:
     def set_plate_comment(self, ghidra_addr):
         """set plate comments at matched functions"""
         comment = getPlateComment(ghidra_addr)  # type: ignore [name-defined] # noqa: F821
+        setBackgroundColor(ghidra_addr, COLOR_PLATE_COMMENT)
         rule_path = self.namespace.replace(Namespace.DELIMITER, "/")
         # 2 calls to avoid duplicate comments via subsequent script runs
         if comment is None:
@@ -119,23 +123,39 @@ class CapaMatchData:
             setPlateComment(ghidra_addr, comment)  # type: ignore [name-defined] # noqa: F821
         elif rule_path not in comment:
             comment = comment + rule_path + "\n"
-            setPlateComment(ghidra_addr, comment)  # type: ignore [name-defined] # noqa: F821
         else:
+            return
+
+
+    def set_function_name(self, ghidra_addr):
+        """sets the function name"""
+        name =  self.namespace.replace(Namespace.DELIMITER, "_") + "_" + str(ghidra_addr)
+        print("new name:" + name)
+        function_manager = currentProgram().getFunctionManager()
+        function = function_manager.getFunctionContaining(ghidra_addr)
+        if function is not None:
+            function.setName(name, SourceType.USER_DEFINED)
+        else:
+            print("woopsie function name went wrong :(")
             return
 
     def set_pre_comment(self, ghidra_addr, sub_type, description):
         """set pre comments at subscoped matches of main rules"""
+        setBackgroundColor(ghidra_addr, COLOR_PRE_COMMENT)
         comment = getPreComment(ghidra_addr)  # type: ignore [name-defined] # noqa: F821
         if comment is None:
             comment = "capa: " + sub_type + "(" + description + ")" + ' matched in "' + self.capability + '"\n'
             setPreComment(ghidra_addr, comment)  # type: ignore [name-defined] # noqa: F821
-        elif self.capability not in comment:
+       
+        elif self.capability not in comment:    
             comment = (
                 comment + "capa: " + sub_type + "(" + description + ")" + ' matched in "' + self.capability + '"\n'
             )
             setPreComment(ghidra_addr, comment)  # type: ignore [name-defined] # noqa: F821
+   
         else:
             return
+
 
     def label_matches(self):
         """label findings at function scopes and comment on subscope matches"""
@@ -152,6 +172,7 @@ class CapaMatchData:
                 sym = symbol_table.getPrimarySymbol(ghidra_addr)
                 if sym is not None:
                     if sym.getSymbolType() == SymbolType.FUNCTION:
+                        self.set_function_name(ghidra_addr)
                         create_label(ghidra_addr, sym.getName(), capa_namespace)
                         self.set_plate_comment(ghidra_addr)
 
@@ -173,7 +194,7 @@ class CapaMatchData:
             # of non-function scoped main matches
             for addr in self.matches.keys():
                 ghidra_addr = toAddr(hex(addr))  # type: ignore [name-defined] # noqa: F821
-
+                self.set_function_name(ghidra_addr)
                 # basic block / insn scoped main matches
                 # Ex. See "Create Process on Windows" Rule
                 func = getFunctionContaining(ghidra_addr)  # type: ignore [name-defined] # noqa: F821
